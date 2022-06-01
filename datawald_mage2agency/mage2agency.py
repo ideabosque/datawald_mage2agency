@@ -36,21 +36,35 @@ class Mage2Agency(Agency):
                         asset["data"].get("type_id"),
                         asset["data"].get("store_id", 0),
                     )
-                    if asset["data"].get("categories"):
-                        self.mage2Connector.insert_update_categories(
-                            sku, asset["data"]["categories"]
-                        )
-                    if asset["data"].get("parent_product_sku"):
-                        self.mage2Connector.insert_update_variant(
-                            sku,
-                            asset["data"],
+                    if len(asset["data"].get("stock_data", {})) > 0:
+                        self.mage2Connector.insert_update_cataloginventory_stock_item(
+                            sku, asset["data"].get("stock_data"),
                             asset["data"].get("store_id", 0),
                         )
 
+                    if len(asset["data"].get("category_data", [])) > 0:
+                        self.mage2Connector.insert_update_categories(
+                            sku, asset["data"].get("category_data")
+                        )
+
+                    if len(asset["data"].get("tier_price_data", [])) > 0:
+                        self.mage2Connector.insert_update_product_tier_price(
+                            sku,
+                            asset["data"].get("tier_price_data"),
+                            asset["data"].get("store_id", 0),
+                        )
+
+                    if asset["data"].get("variant_data"):
+                        self.mage2Connector.insert_update_variant(
+                            sku,
+                            asset["data"].get("variant_data"),
+                            asset["data"].get("store_id", 0),
+                        )
+                    
                 else:
                     raise Exception(f"TX Type ({tx_type}) is not supported!!!")
             except Exception:
                 log = traceback.format_exc()
-                asset.update({"tx_status": "F", "tx_note": log, "tgt_id": "####"})
+                # asset.update({"tx_status": "F", "tx_note": log, "tgt_id": "####"})
                 self.logger.exception(log)
         return assets
