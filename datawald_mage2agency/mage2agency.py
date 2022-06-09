@@ -38,7 +38,8 @@ class Mage2Agency(Agency):
                     )
                     if len(asset["data"].get("stock_data", {})) > 0:
                         self.mage2Connector.insert_update_cataloginventory_stock_item(
-                            sku, asset["data"].get("stock_data"),
+                            sku,
+                            asset["data"].get("stock_data"),
                             asset["data"].get("store_id", 0),
                         )
 
@@ -60,7 +61,7 @@ class Mage2Agency(Agency):
                             asset["data"].get("variant_data"),
                             asset["data"].get("store_id", 0),
                         )
-                    
+
                 else:
                     raise Exception(f"TX Type ({tx_type}) is not supported!!!")
             except Exception:
