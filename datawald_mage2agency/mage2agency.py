@@ -65,13 +65,12 @@ class Mage2Agency(Agency):
             self.mage2Connector.insert_update_categories(
                 sku, asset["data"].get("category_data")
             )
-
-        if len(asset["data"].get("tier_price_data", [])) > 0:
-            self.mage2Connector.insert_update_product_tier_price(
-                sku,
-                asset["data"].get("tier_price_data"),
-                asset["data"].get("store_id", 0),
-            )
+        
+        self.mage2Connector.insert_update_product_tier_price(
+            sku,
+            asset["data"].get("tier_price_data", []),
+            asset["data"].get("store_id", 0),
+        )
 
         if asset["data"].get("variant_data"):
             self.mage2Connector.insert_update_variant(
