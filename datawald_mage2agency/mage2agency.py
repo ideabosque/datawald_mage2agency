@@ -16,6 +16,8 @@ class Mage2Agency(Agency):
         self.mage2Connector = Mage2Connector(logger, **setting)
         self.datawald = DatawaldConnector(logger, **setting)
         Agency.__init__(self, logger, datawald=self.datawald)
+        if setting.get("tx_type"):
+            Agency.tx_type = setting.get("tx_type")
 
     def tx_asset_tgt(self, asset):
         return asset
