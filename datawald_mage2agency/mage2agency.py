@@ -80,5 +80,7 @@ class Mage2Agency(Agency):
                 asset["data"].get("variant_data"),
                 asset["data"].get("store_id", 0),
             )
-
+        self.mage2Connector.request_magento_rest_api(
+            api_path="integration/products/{sku}/urlkey".format(sku=sku), method="POST"
+        )
         return product_id
