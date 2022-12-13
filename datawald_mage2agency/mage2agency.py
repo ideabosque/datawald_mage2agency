@@ -17,6 +17,8 @@ class Mage2Agency(Agency):
         self.mage2OrderConnector = Mage2OrderConnector(logger, **setting)
         self.datawald = DatawaldConnector(logger, **setting)
         Agency.__init__(self, logger, datawald=self.datawald)
+        if setting.get("tx_type"):
+            Agency.tx_type = setting.get("tx_type")
 
     def tx_asset_tgt(self, asset):
         return asset
@@ -63,8 +65,9 @@ class Mage2Agency(Agency):
             )
 
         if len(asset["data"].get("category_data", [])) > 0:
+            ignore_category_ids = self.setting.get("ignore_category_ids", [])
             self.mage2Connector.insert_update_categories(
-                sku, asset["data"].get("category_data")
+                sku, asset["data"].get("category_data"), ignore_category_ids
             )
         
         self.mage2Connector.insert_update_product_tier_price(
