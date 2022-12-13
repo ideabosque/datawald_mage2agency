@@ -62,8 +62,9 @@ class Mage2Agency(Agency):
             )
 
         if len(asset["data"].get("category_data", [])) > 0:
+            ignore_category_ids = self.setting.get("ignore_category_ids", [])
             self.mage2Connector.insert_update_categories(
-                sku, asset["data"].get("category_data")
+                sku, asset["data"].get("category_data"), ignore_category_ids
             )
         
         self.mage2Connector.insert_update_product_tier_price(
