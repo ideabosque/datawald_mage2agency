@@ -3,7 +3,7 @@ from __future__ import print_function
 
 __author__ = "bibow"
 
-import traceback
+import traceback, json
 from datawald_agency import Agency
 from datawald_connector import DatawaldConnector
 from mage2_connector import Mage2Connector, Mage2OrderConnector
@@ -114,26 +114,25 @@ class Mage2Agency(Agency):
         # ecom_so_arr = ecom_so.split("-")
         # print(ecom_so)
         ecom_so = transaction["data"].get("ecom_so", None)
+        warehouse = None
         if ecom_so is not None:
             increment_id = ecom_so
             type = "online_order"
-            if len(increment_id.split("-")) == 1:
-                processing_part = False
-            else:
+            if len(increment_id.split("-")) == 2:
+                warehouse = increment_id.split("-")[1]
                 increment_id = increment_id.split("-")[0]
-                processing_part = True
             # tgt_id = self.insert_update_online_order(increment_id, transaction)
         else:
             increment_id = transaction["data"].get("so_number", None)
             type = "offline_order"
-            processing_part = False
             # tgt_id = self.insert_update_offline_order(increment_id, transaction)
             
         order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
         if type == "offline_order" and order is None:
             self.insert_offline_order(increment_id, transaction)
+            self.mage2OrderConnector.adaptor.commit()
 
-        self.update_mage2_order(increment_id, transaction, type, processing_part)
+        self.update_mage2_order(increment_id, transaction, type, warehouse)
         # if len(ecom_so_arr) > 0:
         #     if len(ecom_so_arr) == 2:
         #         increment_id = ecom_so_arr[0]
@@ -143,10 +142,9 @@ class Mage2Agency(Agency):
                 
         return ecom_so
 
-    def update_mage2_order(self, increment_id, transaction, type, processing_part=False):
+    def update_mage2_order(self, increment_id, transaction, type, warehouse=None):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
-        print(len(items))
         if len(items) == 0 or not increment_id:
             self.logger.error(f"{tx_type_src_id}: There is something wrong in data.")
             return
@@ -154,58 +152,101 @@ class Mage2Agency(Agency):
         if order is None:
             self.logger.error(f"{tx_type_src_id}: Can not find order")
             return
-        print(increment_id)
+
+        api_items=[]
+        api_item_ids = []
+        api_item_details = []
+        if warehouse is not None:
+            order_items = self.mage2OrderConnector.get_order_items(order.get("entity_id"))
+            for ns_item in items:
+                for order_item in order_items:
+                    if order_item.get("parent_item_id", None) is None and order_item.get("sku") == ns_item.get("sku"):
+                        product_options = json.loads(order_item.get("product_options")) if order_item.get("product_options", None) is not None else None
+                        if product_options and product_options.get("info_buyRequest", {}).get("warehouse") == warehouse:
+                            api_items.append({
+                                "order_item_id": order_item.get("item_id"),
+                                "qty": ns_item.get("qty_ordered", 0)
+                            })
+                            api_item_details.append(
+                                {
+                                    "order_item_id": order_item.get("item_id"),
+                                    "sku": ns_item.get("sku"),
+                                    "name": order_item.get("name"),
+                                    "qty": ns_item.get("qty_ordered", 0)
+                                }
+                            )
+                            api_item_ids.append(order_item.get("item_id"))
         if transaction["data"].get("sales_rep_name", None):
-            print(transaction["data"].get("sales_rep_name"))
-            print("insert_order_comment")
             sales_rep_name_comment = "Sales Rep: {sales_rep_name}".format(sales_rep_name=transaction["data"].get("sales_rep_name"))
-            print(sales_rep_name_comment)
             self.mage2OrderConnector.insert_order_comment(order_id=order["entity_id"], comment=sales_rep_name_comment, status=order.get("status"))
 
         order_ns_status = transaction["data"].get("status")
-        print(order_ns_status)
         if self.mage2OrderConnector.can_invoice_order(order) and order_ns_status == "Billed":
-            print("invoice")
-            self.mage2OrderConnector.invoice_order(
-            order_id=order.get("entity_id"),
-            capture=True,
-            items=[],
-            notify=False,
-            append_comment=False,
-            comment=None,
-            is_visible_on_front=False
-            )
-        print("check ship")
-        print(self.mage2OrderConnector.can_ship_order(order))
+            can_invoice = True
+            if len(api_item_ids) > 0 and not self.mage2OrderConnector.can_invoice_order_items(order, api_item_ids):
+                can_invoice = False
+            if can_invoice:
+                append_comment = False
+                comment = None
+                if len(api_items) > 0:
+                    append_comment = True
+                    comment= "Invoiced {details}".format(
+                        details=", ".join([
+                            "{name}({sku})".format(name=item.get("name"), sku=item.get("sku"))
+                            for item in api_item_details
+                        ])
+                    )
+                self.mage2OrderConnector.invoice_order(
+                    order_id=order.get("entity_id"),
+                    capture=True,
+                    items=api_items,
+                    notify=False,
+                    append_comment=append_comment,
+                    comment=comment,
+                    is_visible_on_front=False
+                )
+                self.mage2OrderConnector.adaptor.commit()
+
         if self.mage2OrderConnector.can_ship_order(order) and order_ns_status == "Billed":
-            print("ship")
+            can_ship = True
+            if len(api_item_ids) > 0 and not self.mage2OrderConnector.can_ship_order_items(order, api_item_ids):
+                can_ship = False
             tracking_numbers = transaction["data"].get("tracking_numbers", [])
-            print(tracking_numbers)
-            if len(tracking_numbers) > 0:
+            if len(tracking_numbers) > 0 and can_ship:
                 carrier_code = transaction["data"].get("carrier_code", "Carrier")
                 tracks = [
                     {"carrier_code": carrier_code, "title": "Tracking Number", "track_number": track_number}
                     for track_number in tracking_numbers
                 ]
+                append_comment = False
+                comment = None
+                if len(api_items) > 0:
+                    append_comment = True
+                    comment= "Shipped {details}".format(
+                        details=", ".join([
+                            "{name}({sku})".format(name=item.get("name"), sku=item.get("sku"))
+                            for item in api_item_details
+                        ])
+                    )
                 self.mage2OrderConnector.ship_order(
                     order_id=order.get("entity_id"),
-                    items=[],
+                    items=api_items,
                     notify=False, 
-                    append_comment=False,
-                    comment=None,
+                    append_comment=append_comment,
+                    comment=comment,
                     is_visible_on_front=False,
                     tracks=tracks
                 )
+                self.mage2OrderConnector.adaptor.commit()
 
         transformed_status = self.transform_ns_order_status(transaction)
-        print(transformed_status)
         if transformed_status is not None:
+            if warehouse is not None:
+                return
             order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
             current_order_status = order.get("status")
             ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
             current_order_state = order.get("state")
-            print(current_order_status)
-            print(ns_status)
             if current_order_status == ns_status:
                 return
             if current_order_state in [self.mage2OrderConnector.STATE_NEW, self.mage2OrderConnector.STATE_PROCESSING,self.mage2OrderConnector.STATE_COMPLETE,self.mage2OrderConnector.STATE_CANCELED, self.mage2OrderConnector.STATE_CLOSED]:
@@ -218,13 +259,13 @@ class Mage2Agency(Agency):
                     self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), current_order_state, ns_status)
                 
             status_comment = "Update Status to {ns_status}".format(ns_status=ns_status)
-            print("insert_order_comment")
             self.mage2OrderConnector.insert_order_comment(
                 order_id=order.get("entity_id"),
                 comment=status_comment,
                 status=ns_status,
                 allow_duplicate_comment=True
             )
+        
                     
         
     def transform_ns_order_status(self, transaction):
@@ -240,10 +281,10 @@ class Mage2Agency(Agency):
                 if_status = transaction["data"].get("fulfill_ship_status")
                 suffix = ""
                 if transaction["data"].get("carrier_code") == "CUSTOMER PICKUP":
-                    suffix = "_for_customer"
+                    suffix = "_for_cusotmer"
                 status = "{if_status}{suffix}".format(if_status=if_status, suffix=suffix)
         return status
-
+    
     def insert_offline_order(self, increment_id, transaction):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
@@ -263,9 +304,15 @@ class Mage2Agency(Agency):
         for item in items:
             product_id = self.mage2Connector.get_product_id_by_sku(item.get("sku"))
             if product_id != 0:
-                avaliable_items.append(item)
+                type_id = self.mage2Connector.get_product_type_id_by_sku(item.get("sku"))
+                product_name = self.mage2Connector.get_entity_attribute_value("catalog_product", product_id, "name", store_id=0)
+                weight = self.mage2Connector.get_entity_attribute_value("catalog_product", product_id, "weight", store_id=0)
+                avaliable_items.append(dict(item, **{"product_id": product_id, "product_type": type_id, "product_name": product_name, "weight": weight}))
                 subtotal = subtotal + float(item.get("row_total"))
                 total_qty_ordered = total_qty_ordered + float(item.get("qty_ordered", 0))
+        avaliable_items)
+        if len(avaliable_items) == 0:
+            raise Exception(f"{tx_type_src_id}: No avaliable product items")
         grand_total = subtotal + shipping_amount
         billing_address = transaction["data"].get("billing_address", {})
         shipping_address = transaction["data"].get("shipping_address", {})
@@ -308,7 +355,12 @@ class Mage2Agency(Agency):
                     "method": self.setting.get("offline_default_payment_method", "checkmo")
                 },
                 "extension_attributes": {
-                    "is_offline_order": True, 
+                    "amasty_order_attributes": [
+                        {
+                            "attribute_code": "is_offline_order",
+                            "value": True
+                        }
+                    ], 
                     "shipping_assignments": [
                         {
                             "shipping": {
@@ -335,8 +387,13 @@ class Mage2Agency(Agency):
             posts["entity"]["items"].append(
                 {
                     "sku": avaliable_item.get("sku"),
+                    "product_id": avaliable_item.get("product_id"),
+                    "product_type": avaliable_item.get("product_type"),
+                    "name": avaliable_item.get("product_name"),
+                    "weight": str(avaliable_item.get("weight", 0)),
+                    "store_id": 1,
                     "is_virtual": 0,
-                    "qty_ordered": avaliable_item.get("qty_orderd", 0),
+                    "qty_ordered": avaliable_item.get("qty_ordered", 0),
                     "price": avaliable_item.get("price", 0),
                     "base_price": avaliable_item.get("price", 0),
                     "row_total": avaliable_item.get("row_total", 0),
@@ -346,8 +403,6 @@ class Mage2Agency(Agency):
         response = self.mage2OrderConnector.request_magento_rest_api(
             api_path="orders/create", method="PUT", payload=posts
         )
-        print(response)
-        pass
     
     def get_customer_id_by_company_no(self, company_no):
         try:
@@ -359,7 +414,7 @@ class Mage2Agency(Agency):
             "SELECT * FROM customer_entity_varchar WHERE attribute_id = %s AND value = %s;",
             [attribute_id, company_no]
         )
-        res = self.adaptor.mysql_cursor.fetchone()
+        res = self.mage2Connector.adaptor.mysql_cursor.fetchone()
         if res is None:
             return None
         else:
@@ -370,5 +425,5 @@ class Mage2Agency(Agency):
             "SELECT * FROM customer_entity WHERE entity_id = %s;",
             [customer_id]
         )
-        res = self.adaptor.mysql_cursor.fetchone()
+        res = self.mage2Connector.adaptor.mysql_cursor.fetchone()
         return res
