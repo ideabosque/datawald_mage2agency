@@ -310,7 +310,6 @@ class Mage2Agency(Agency):
                 avaliable_items.append(dict(item, **{"product_id": product_id, "product_type": type_id, "product_name": product_name, "weight": weight}))
                 subtotal = subtotal + float(item.get("row_total"))
                 total_qty_ordered = total_qty_ordered + float(item.get("qty_ordered", 0))
-        avaliable_items)
         if len(avaliable_items) == 0:
             raise Exception(f"{tx_type_src_id}: No avaliable product items")
         grand_total = subtotal + shipping_amount
