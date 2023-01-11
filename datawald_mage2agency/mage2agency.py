@@ -143,12 +143,10 @@ class Mage2Agency(Agency):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
         if len(items) == 0 or not increment_id:
-            self.logger.error(f"{tx_type_src_id}: There is something wrong in data.")
-            return
+            raise Exception(f"{tx_type_src_id}: There is something wrong in data.")
         order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
         if order is None:
-            self.logger.error(f"{tx_type_src_id}: Can not find order")
-            return
+            raise Exception(f"{tx_type_src_id}: Can not find order")
 
         api_items=[]
         api_item_ids = []
@@ -286,8 +284,7 @@ class Mage2Agency(Agency):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
         if len(items) == 0 or not increment_id:
-            self.logger.error(f"{tx_type_src_id}: No items or empty increment_id")
-            return
+            raise Exception(f"{tx_type_src_id}: No items or empty increment_id")
         if not transaction["data"].get("customer_id"):
             raise Exception(f"{tx_type_src_id}: Empty customer_id")
         customer_id = self.get_customer_id_by_company_no(transaction["data"].get("customer_id"))
