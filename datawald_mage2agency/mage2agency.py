@@ -87,6 +87,12 @@ class Mage2Agency(Agency):
         )
         return product_id
 
+    def tx_transaction_tgt(self, transaction):
+        return transaction
+
+    def tx_transaction_tgt_ext(self, new_transaction, transaction):
+        pass
+
     def insert_update_transactions(self, transactions):
         for transaction in transactions:
             tx_type = transaction.get("tx_type_src_id").split("-")[0]
@@ -110,9 +116,6 @@ class Mage2Agency(Agency):
         return transactions
 
     def insert_update_order(self, transaction):
-        # ecom_so = transaction.get("tx_type_src_id").replace(f"order-", "")
-        # ecom_so_arr = ecom_so.split("-")
-        # print(ecom_so)
         ecom_so = transaction["data"].get("ecom_so", None)
         warehouse = None
         if ecom_so is not None:
@@ -132,15 +135,9 @@ class Mage2Agency(Agency):
             self.insert_offline_order(increment_id, transaction)
             self.mage2OrderConnector.adaptor.commit()
 
-        self.update_mage2_order(increment_id, transaction, type, warehouse)
-        # if len(ecom_so_arr) > 0:
-        #     if len(ecom_so_arr) == 2:
-        #         increment_id = ecom_so_arr[0]
+        tgt_id = self.update_mage2_order(increment_id, transaction, type, warehouse)
                 
-        #     elif len(ecom_so_arr) == 1:
-        #         increment_id = ecom_so_arr[0]
-                
-        return ecom_so
+        return tgt_id
 
     def update_mage2_order(self, increment_id, transaction, type, warehouse=None):
         tx_type_src_id = transaction.get("tx_type_src_id")
@@ -265,7 +262,7 @@ class Mage2Agency(Agency):
                 status=ns_status,
                 allow_duplicate_comment=True
             )
-        
+        return order.get("entity_id")
                     
         
     def transform_ns_order_status(self, transaction):
