@@ -151,6 +151,14 @@ class Mage2Agency(Agency):
         api_items=[]
         api_item_ids = []
         api_item_details = []
+
+        coa_files = []
+        for ns_item in items:
+            if isinstance(ns_item.get("coa_file_urls", None), list) and len(ns_item.get("coa_file_urls", [])) > 0:
+                for file_url in ns_item.get("coa_file_urls", []):
+                    coa_files.append(file_url)
+        if len(coa_files) > 0:
+            self.save_coa_files(order.get("entity_id"), coa_files)
         if warehouse is not None:
             order_items = self.mage2OrderConnector.get_order_items(order.get("entity_id"))
             for ns_item in items:
@@ -283,6 +291,9 @@ class Mage2Agency(Agency):
     def insert_offline_order(self, increment_id, transaction):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
+        print(items)
+        print(tx_type_src_id)
+        print(increment_id)
         if len(items) == 0 or not increment_id:
             raise Exception(f"{tx_type_src_id}: No items or empty increment_id")
         if not transaction["data"].get("customer_id"):
@@ -420,3 +431,32 @@ class Mage2Agency(Agency):
         )
         res = self.mage2Connector.adaptor.mysql_cursor.fetchone()
         return res
+    
+    def save_coa_files(self, order_id, coa_files=[]):
+        if len(coa_files) == 0:
+            return
+        try:
+            (data_type, attribute_metadata) = self.mage2Connector.get_attribute_metadata("coa_file_urls", "amasty_checkout")
+        except Exception as e:
+            return
+        try:
+            coa_string = "\n".join(coa_files)
+            attribute_id = attribute_metadata["attribute_id"]
+            self.mage2Connector.adaptor.mysql_cursor.execute(
+                """
+                INSERT INTO `amasty_order_attribute_entity_text` (`attribute_id`, `entity_id`, `value`)
+                    SELECT %s as attribute_id, a.entity_id as entity_id, %s as value
+                    FROM `amasty_order_attribute_entity` a
+                    where a.parent_id = %s and a.parent_entity_type = 1
+                ON DUPLICATE KEY UPDATE `value`=%s;
+                """,
+                [
+                    attribute_id,
+                    coa_string,
+                    order_id,
+                    coa_string
+                ]
+            )
+            self.mage2Connector.adaptor.commit()
+        except Exception as e:
+            self.logger.error(str(e))
