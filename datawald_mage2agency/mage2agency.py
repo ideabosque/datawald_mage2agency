@@ -291,9 +291,6 @@ class Mage2Agency(Agency):
     def insert_offline_order(self, increment_id, transaction):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
-        print(items)
-        print(tx_type_src_id)
-        print(increment_id)
         if len(items) == 0 or not increment_id:
             raise Exception(f"{tx_type_src_id}: No items or empty increment_id")
         if not transaction["data"].get("customer_id"):
