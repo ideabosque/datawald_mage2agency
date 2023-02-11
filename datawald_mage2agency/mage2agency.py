@@ -210,17 +210,20 @@ class Mage2Agency(Agency):
                 )
                 self.mage2OrderConnector.adaptor.commit()
 
-        if self.mage2OrderConnector.can_ship_order(order) and order_ns_status == "Billed":
+        if self.mage2OrderConnector.can_ship_order(order) and transaction["data"].get("fulfill_ship_status") == "_shipped" and order_ns_status == "Billed":
             can_ship = True
             if len(api_item_ids) > 0 and not self.mage2OrderConnector.can_ship_order_items(order, api_item_ids):
                 can_ship = False
-            tracking_numbers = transaction["data"].get("tracking_numbers", [])
-            if len(tracking_numbers) > 0 and can_ship:
+            
+            if can_ship:
                 carrier_code = transaction["data"].get("carrier_code", "Carrier")
-                tracks = [
-                    {"carrier_code": carrier_code, "title": "Tracking Number", "track_number": track_number}
-                    for track_number in tracking_numbers
-                ]
+                tracks = []
+                tracking_numbers = transaction["data"].get("tracking_numbers", [])
+                if len(tracking_numbers) > 0:
+                    tracks = [
+                        {"carrier_code": carrier_code, "title": "Tracking Number", "track_number": track_number}
+                        for track_number in tracking_numbers
+                    ]
                 append_comment = False
                 comment = None
                 if len(api_items) > 0:
@@ -245,7 +248,7 @@ class Mage2Agency(Agency):
         transformed_status = self.transform_ns_order_status(transaction)
         if transformed_status is not None:
             if warehouse is not None:
-                return
+                return order.get("entity_id")
             order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
             current_order_status = order.get("status")
             ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
