@@ -122,7 +122,7 @@ class Mage2Agency(Agency):
             increment_id = ecom_so
             type = "online_order"
             if len(increment_id.split("-")) == 2:
-                warehouse = increment_id.split("-")[1]
+                warehouse = increment_id.split("-")[1].lower()
                 increment_id = increment_id.split("-")[0]
             # tgt_id = self.insert_update_online_order(increment_id, transaction)
         else:
@@ -247,11 +247,21 @@ class Mage2Agency(Agency):
 
         transformed_status = self.transform_ns_order_status(transaction)
         if transformed_status is not None:
+            ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
             if warehouse is not None:
+                is_updated = self.save_warehouses_statuses(order_id=order.get("entity_id"), warehouse_code=warehouse, status=ns_status)
+                if is_updated:
+                    warehouse_status_comment = "Update Warehouse ({warehouse}) Status to {ns_status}".format(warehouse=warehouse, ns_status=ns_status)
+                    self.mage2OrderConnector.insert_order_comment(
+                        order_id=order.get("entity_id"),
+                        comment=warehouse_status_comment,
+                        status=order.get("status"),
+                        allow_duplicate_comment=False
+                    )
                 return order.get("entity_id")
+
             order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
             current_order_status = order.get("status")
-            ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
             current_order_state = order.get("state")
             if current_order_status == ns_status:
                 return
@@ -432,6 +442,89 @@ class Mage2Agency(Agency):
         res = self.mage2Connector.adaptor.mysql_cursor.fetchone()
         return res
     
+    def save_warehouses_statuses(self, order_id, warehouse_code, status):
+        try:
+            warehouses_statuses = {}
+            (entity_id, origin_value) = self.get_order_attribute_value(order_id=order_id, attribute_code="warehouse_statuses")
+            if origin_value is not None:
+                warehouses_statuses = json.loads(origin_value)
+            warehouses_statuses.update({
+                warehouse_code: status
+            })
+            warehouses_statuses_string = json.dumps(warehouses_statuses)
+            if origin_value == warehouses_statuses_string:
+                return False
+            self.save_order_attribute_value(order_id=order_id, attribute_code="warehouse_statuses", value=warehouses_statuses_string, entity_id=entity_id)
+            return True
+        except Exception as e:
+            return False
+
+    def get_order_attribute_value(self, order_id, attribute_code):
+        (data_type, attribute_metadata) = self.mage2Connector.get_attribute_metadata(attribute_code, "amasty_checkout")
+        attribute_id = attribute_metadata["attribute_id"]
+        attribute_value_table = "amasty_order_attribute_entity_{data_type}".format(data_type=data_type)
+        sql = """
+            SELECT e.entity_id, v.value
+            FROM amasty_order_attribute_entity AS e
+            LEFT JOIN {attribute_value_table} as v ON v.entity_id = e.entity_id
+            WHERE v.attribute_id = %s AND e.parent_id = %s AND e.parent_entity_type = 1;
+        """.format(attribute_value_table=attribute_value_table)
+
+        self.mage2Connector.adaptor.mysql_cursor.execute(
+            sql,
+            [
+                attribute_id,
+                order_id
+            ]
+        )
+        res = self.mage2Connector.adaptor.mysql_cursor.fetchone()
+        value = None
+        entity_id = None
+        if res is not None:
+            value = res["value"]
+            entity_id = res["entity_id"]
+        return (entity_id, value)
+    
+    def save_order_attribute_value(self, order_id, attribute_code, value, entity_id=None):
+        try:
+            (data_type, attribute_metadata) = self.mage2Connector.get_attribute_metadata(attribute_code, "amasty_checkout")
+        except Exception as e:
+            return
+        if entity_id is None:
+            self.mage2Connector.adaptor.mysql_cursor.execute(
+                """
+                SELECT entity_id 
+                FROM amasty_order_attribute_entity
+                WHERE parent_id = %s and parent_entity_type = 1;
+                """,
+                [
+                    order_id
+                ]
+            )
+            res = self.mage2Connector.adaptor.mysql_cursor.fetchone()
+            if res is not None:
+                entity_id = res["entity_id"]
+
+        if entity_id is None:
+            return
+        attribute_id = attribute_metadata["attribute_id"]
+        attribute_value_table = "amasty_order_attribute_entity_{data_type}".format(data_type=data_type)
+        sql = """
+            INSERT INTO {attribute_value_table} (`attribute_id`, `entity_id`, `value`)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE `value`=%s;
+        """.format(attribute_value_table=attribute_value_table)
+        self.mage2Connector.adaptor.mysql_cursor.execute(
+            sql,
+            [
+                attribute_id,
+                entity_id,
+                value,
+                value
+            ]
+        )
+        self.mage2Connector.adaptor.commit()
+
     def save_coa_files(self, order_id, coa_files=[]):
         if len(coa_files) == 0:
             return
