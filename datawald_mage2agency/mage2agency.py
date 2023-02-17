@@ -264,7 +264,7 @@ class Mage2Agency(Agency):
             current_order_status = order.get("status")
             current_order_state = order.get("state")
             if current_order_status == ns_status:
-                return
+                return order.get("entity_id")
             if current_order_state in [self.mage2OrderConnector.STATE_NEW, self.mage2OrderConnector.STATE_PROCESSING,self.mage2OrderConnector.STATE_COMPLETE,self.mage2OrderConnector.STATE_CANCELED, self.mage2OrderConnector.STATE_CLOSED]:
                 if current_order_state == self.mage2OrderConnector.STATE_CANCELED:
                     if ns_status == "canceled":
