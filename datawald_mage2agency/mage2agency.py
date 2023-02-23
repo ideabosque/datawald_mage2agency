@@ -322,6 +322,8 @@ class Mage2Agency(Agency):
                 type_id = self.mage2Connector.get_product_type_id_by_sku(item.get("sku"))
                 product_name = self.mage2Connector.get_entity_attribute_value("catalog_product", product_id, "name", store_id=0)
                 weight = self.mage2Connector.get_entity_attribute_value("catalog_product", product_id, "weight", store_id=0)
+                if weight is None:
+                    weight = 0.001
                 avaliable_items.append(dict(item, **{"product_id": product_id, "product_type": type_id, "product_name": product_name, "weight": weight}))
                 subtotal = subtotal + float(item.get("row_total"))
                 total_qty_ordered = total_qty_ordered + float(item.get("qty_ordered", 0))
@@ -394,7 +396,8 @@ class Mage2Agency(Agency):
                             }
                         }
                     ]
-                }
+                },
+                "created_at": transaction["data"].get("created_at")
             }
         }
         for avaliable_item in avaliable_items:
