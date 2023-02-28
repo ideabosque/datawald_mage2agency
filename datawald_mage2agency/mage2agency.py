@@ -8,6 +8,8 @@ from datawald_agency import Agency
 from datawald_connector import DatawaldConnector
 from mage2_connector import Mage2Connector, Mage2OrderConnector
 
+class IgnoreException(Exception):
+    pass
 
 class Mage2Agency(Agency):
     def __init__(self, logger, **setting):
@@ -109,6 +111,10 @@ class Mage2Agency(Agency):
                         "tgt_id": tgt_id,
                     }
                 )
+            except IgnoreException:
+                log = traceback.format_exc()
+                transaction.update({"tx_status": "I", "tx_note": log, "tgt_id": "####"})
+                self.logger.info(log)
             except Exception:
                 log = traceback.format_exc()
                 transaction.update({"tx_status": "F", "tx_note": log, "tgt_id": "####"})
@@ -129,7 +135,9 @@ class Mage2Agency(Agency):
             increment_id = transaction["data"].get("so_number", None)
             type = "offline_order"
             # tgt_id = self.insert_update_offline_order(increment_id, transaction)
-            
+        if type == "offline_order" and self.setting.get("ignore_offline_order", True):
+            raise IgnoreException(f"Ignore offline order: {increment_id}")
+        
         order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
         if type == "offline_order" and order is None:
             self.insert_offline_order(increment_id, transaction)
