@@ -350,6 +350,8 @@ class Mage2Agency(Agency):
                 "customer_lastname": customer_data["lastname"],
                 "shipping_description": transaction["data"].get("carrier_code"),
                 "store_currency_code": "USD",
+                "order_currency_code": "USD",
+                "global_currency_code": "USD",
                 "increment_id": increment_id,
                 "billing_address": {
                     "address_type": "billing",
