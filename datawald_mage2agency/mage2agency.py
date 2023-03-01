@@ -315,6 +315,9 @@ class Mage2Agency(Agency):
         shipping_amount = float(transaction["data"].get("shipping_amount", 0))
         total_qty_ordered = 0
         for item in items:
+            if self.is_shipping_charge_sku(item.get("sku")):
+                shipping_amount = shipping_amount + + float(item.get("row_total"))
+                continue
             product_id = self.mage2Connector.get_product_id_by_sku(item.get("sku"))
             if product_id != 0:
                 type_id = self.mage2Connector.get_product_type_id_by_sku(item.get("sku"))
@@ -325,6 +328,8 @@ class Mage2Agency(Agency):
                 avaliable_items.append(dict(item, **{"product_id": product_id, "product_type": type_id, "product_name": product_name, "weight": weight}))
                 subtotal = subtotal + float(item.get("row_total"))
                 total_qty_ordered = total_qty_ordered + float(item.get("qty_ordered", 0))
+            else:
+                raise Exception(f"{tx_type_src_id}: Sku: '{item.get('sku')}' not in Magento")
         if len(avaliable_items) == 0:
             raise Exception(f"{tx_type_src_id}: No avaliable product items")
         grand_total = subtotal + shipping_amount
@@ -421,6 +426,14 @@ class Mage2Agency(Agency):
             api_path="orders/create", method="PUT", payload=posts
         )
     
+    def is_shipping_charge_sku(self, sku):
+        shipping_charge_skus = self.setting.get("shipping_charge_skus", [])
+        if not isinstance(shipping_charge_skus, list) or len(shipping_charge_skus) == 0:
+            return False
+        if sku in shipping_charge_skus:
+            return True
+        return False
+        
     def get_customer_id_by_company_no(self, company_no):
         try:
             (data_type, attribute_metadata) = self.mage2Connector.get_attribute_metadata("company_no", "customer")
