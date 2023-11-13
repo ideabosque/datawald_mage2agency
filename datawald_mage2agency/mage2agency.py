@@ -266,29 +266,54 @@ class Mage2Agency(Agency):
                         status=order.get("status"),
                         allow_duplicate_comment=False
                     )
+                if ns_status == "canceled" and len(api_item_ids) > 0:
+                    self.mage2OrderConnector.cancel_order_items(order, api_item_ids)
+                    status_comment = "Warehouse {warehouse} is canceled".format(warehouse=warehouse)
+                    self.mage2OrderConnector.insert_order_comment(
+                        order_id=order.get("entity_id"),
+                        comment=status_comment,
+                        status=order.get("status"),
+                        allow_duplicate_comment=False
+                    )
                 return order.get("entity_id")
+            order_status_state_rows = self.mage2OrderConnector.get_order_status_state()
+            state_status = {}
+            for row in order_status_state_rows:
+                if row["state"] not in state_status:
+                    state_status[row["state"]] = []
+                state_status[row["state"]].append(row["status"])
 
             order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
             current_order_status = order.get("status")
+            # ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
             current_order_state = order.get("state")
             if current_order_status == ns_status:
                 return order.get("entity_id")
-            if current_order_state in [self.mage2OrderConnector.STATE_NEW, self.mage2OrderConnector.STATE_PROCESSING,self.mage2OrderConnector.STATE_COMPLETE,self.mage2OrderConnector.STATE_CANCELED, self.mage2OrderConnector.STATE_CLOSED]:
-                if current_order_state == self.mage2OrderConnector.STATE_CANCELED:
-                    if ns_status == "canceled":
-                        self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), current_order_state, ns_status)
+            
+            status_comment = None
+            if current_order_state == self.mage2OrderConnector.STATE_COMPLETE and ns_status not in state_status[self.mage2OrderConnector.STATE_COMPLETE]:
+                status_comment = "The order is completed. Failed to update status to {ns_status}".format(ns_status=current_order_status)
+            if status_comment is None:
+                if current_order_state in [self.mage2OrderConnector.STATE_NEW, self.mage2OrderConnector.STATE_PROCESSING,self.mage2OrderConnector.STATE_COMPLETE,self.mage2OrderConnector.STATE_CANCELED, self.mage2OrderConnector.STATE_CLOSED]:
+                    if ns_status in ["canceled", "closed"]:
+                        self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), ns_status, ns_status)
                     else:
-                        self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), self.mage2OrderConnector.STATE_PROCESSING, ns_status)
-                else:
-                    self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), current_order_state, ns_status)
-                
-            status_comment = "Update Status to {ns_status}".format(ns_status=ns_status)
-            self.mage2OrderConnector.insert_order_comment(
-                order_id=order.get("entity_id"),
-                comment=status_comment,
-                status=ns_status,
-                allow_duplicate_comment=True
-            )
+                        if current_order_state == self.mage2OrderConnector.STATE_CANCELED:
+                            if ns_status == "canceled":
+                                self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), current_order_state, ns_status)
+                            else:
+                                self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), self.mage2OrderConnector.STATE_PROCESSING, ns_status)
+                        else:
+                            self.mage2OrderConnector.update_order_state_status(order.get("entity_id"), current_order_state, ns_status)
+            
+                status_comment = "Update Status to {ns_status}".format(ns_status=ns_status)
+            if status_comment is not None:
+                self.mage2OrderConnector.insert_order_comment(
+                    order_id=order.get("entity_id"),
+                    comment=status_comment,
+                    status=ns_status,
+                    allow_duplicate_comment=True
+                )
         return order.get("entity_id")
                     
         
