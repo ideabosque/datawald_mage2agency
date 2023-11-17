@@ -257,7 +257,7 @@ class Mage2Agency(Agency):
         if transformed_status is not None:
             ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
             if warehouse is not None:
-                if ns_status == "canceled" and len(api_item_ids) > 0:
+                if ns_status in ["canceled", "closed"] and len(api_item_ids) > 0:
                     self.mage2OrderConnector.cancel_order_items(order, api_item_ids)
                     status_comment = "Warehouse {warehouse} is canceled".format(warehouse=warehouse)
                     self.mage2OrderConnector.insert_order_comment(
