@@ -266,7 +266,7 @@ class Mage2Agency(Agency):
                         status=order.get("status"),
                         allow_duplicate_comment=False
                     )
-                if ns_status == "canceled" and len(api_item_ids) > 0:
+                if ns_status in ["canceled", "closed"] and len(api_item_ids) > 0:
                     self.mage2OrderConnector.cancel_order_items(order, api_item_ids)
                     status_comment = "Warehouse {warehouse} is canceled".format(warehouse=warehouse)
                     self.mage2OrderConnector.insert_order_comment(
