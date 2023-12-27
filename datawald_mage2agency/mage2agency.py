@@ -124,17 +124,21 @@ class Mage2Agency(Agency):
     def insert_update_order(self, transaction):
         ecom_so = transaction["data"].get("ecom_so", None)
         warehouse = None
-        if ecom_so is not None:
+        order_type = transaction["data"].get("order_type", None)
+        if order_type == "online":
             increment_id = ecom_so
             type = "online_order"
             if len(increment_id.split("-")) == 2:
                 warehouse = increment_id.split("-")[1]
                 increment_id = increment_id.split("-")[0]
             # tgt_id = self.insert_update_online_order(increment_id, transaction)
-        else:
+        elif order_type == "offline":
             increment_id = transaction["data"].get("so_number", None)
             type = "offline_order"
             # tgt_id = self.insert_update_offline_order(increment_id, transaction)
+        else:
+            raise Exception(f"Undefine order type: {increment_id}")
+        
         if type == "offline_order":
             if self.setting.get("ignore_offline_order", True):
                 raise IgnoreException(f"Ignore offline order: {increment_id}")
