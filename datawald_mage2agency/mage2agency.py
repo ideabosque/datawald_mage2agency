@@ -499,12 +499,14 @@ class Mage2Agency(Agency):
         }
         billing_address = transaction["data"].get("billing_address", {})
         shipping_address = transaction["data"].get("shipping_address", {})
+        customer_po = transaction["data"].get("customer_po", None)
         posts = {
             "order": {
                 "order_type": "offline_ns",
                 "integration_id": increment_id,
                 "customer_id": company_no,
                 "increment_id": increment_id,
+                "customer_po": customer_po,
                 "billing_address": {
                     "region": billing_address.get("region"),
                     "city": billing_address.get("city"),
