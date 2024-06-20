@@ -470,9 +470,10 @@ class Mage2Agency(Agency):
         company_no = transaction["data"].get("customer_id")
         avaliable_items = []
         for item in items:
-            product_id = self.mage2Connector.get_product_id_by_sku(item.get("sku"))
-            if product_id != 0:
-                avaliable_items.append(item)
+            # move product check logic to Magento
+            # product_id = self.mage2Connector.get_product_id_by_sku(item.get("sku"))
+            # if product_id != 0:
+            avaliable_items.append(item)
         if len(avaliable_items) == 0:
             raise Exception(f"{tx_type_src_id}: No avaliable product items")
         warehouse_code_mapping = self.setting.get("location_name_warehouse_code_mapping", {})
