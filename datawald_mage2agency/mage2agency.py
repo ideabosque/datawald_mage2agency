@@ -261,7 +261,8 @@ class Mage2Agency(Agency):
                     append_comment=append_comment,
                     comment=comment,
                     is_visible_on_front=False,
-                    tracks=tracks
+                    tracks=tracks,
+                    ship_date=transaction["data"].get("ship_date", None)
                 )
                 self.mage2OrderConnector.adaptor.commit()
 
@@ -534,7 +535,6 @@ class Mage2Agency(Agency):
                 "created_at": transaction["data"].get("created_at")
             }
         }
-        
         response = self.mage2OrderConnector.request_magento_rest_api(
             api_path="integration/orders/create", method="PUT", payload=posts
         )
