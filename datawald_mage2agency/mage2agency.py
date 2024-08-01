@@ -131,6 +131,9 @@ class Mage2Agency(Agency):
             if len(increment_id.split("-")) == 2:
                 warehouse = increment_id.split("-")[1].lower()
                 increment_id = increment_id.split("-")[0]
+            elif len(increment_id.split("-")) == 3:
+                warehouse = increment_id.split("-")[2].lower()
+                increment_id = increment_id.split("-")[0]
             # tgt_id = self.insert_update_online_order(increment_id, transaction)
         elif order_type == "offline":
             increment_id = transaction["data"].get("so_number", None)
