@@ -175,23 +175,45 @@ class Mage2Agency(Agency):
     def insert_update_order(self, transaction):
         ecom_so = transaction["data"].get("ecom_so", None)
         warehouse = None
-        if ecom_so is not None:
+        order_type = transaction["data"].get("order_type", None)
+        if order_type == "online":
             increment_id = ecom_so
             type = "online_order"
             if len(increment_id.split("-")) == 2:
                 warehouse = increment_id.split("-")[1].lower()
                 increment_id = increment_id.split("-")[0]
+            elif len(increment_id.split("-")) == 3:
+                warehouse = increment_id.split("-")[2].lower()
+                increment_id = increment_id.split("-")[0]
             # tgt_id = self.insert_update_online_order(increment_id, transaction)
-        else:
+        elif order_type == "offline":
             increment_id = transaction["data"].get("so_number", None)
             type = "offline_order"
             # tgt_id = self.insert_update_offline_order(increment_id, transaction)
-        if type == "offline_order" and self.setting.get("ignore_offline_order", True):
-            raise IgnoreException(f"Ignore offline order: {increment_id}")
+        else:
+            raise Exception(f"Undefine order type: {increment_id}")
+
+        if type == "offline_order":
+            if self.setting.get("ignore_offline_order", True):
+                raise IgnoreException(f"Ignore offline order: {increment_id}")
+            if len(
+                self.setting.get("allow_import_offline_order_gwi_account_no", [])
+            ) > 0 and str(
+                transaction["data"].get("customer_id")
+            ) not in self.setting.get(
+                "allow_import_offline_order_gwi_account_no", []
+            ):
+                gwi_account_no = str(transaction["data"].get("customer_id"))
+                raise IgnoreException(
+                    f"Ignore offline order: {increment_id}, GWI Account No. {gwi_account_no} is not allowed."
+                )
 
         order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
         if type == "offline_order" and order is None:
-            self.insert_offline_order(increment_id, transaction)
+            if self.setting.get("use_new_create_order_api", False):
+                self.insert_offline_order_by_custom_api(increment_id, transaction)
+            else:
+                self.insert_offline_order_by_default_api(increment_id, transaction)
             self.mage2OrderConnector.adaptor.commit()
 
         tgt_id = self.update_mage2_order(increment_id, transaction, type, warehouse)
@@ -353,6 +375,7 @@ class Mage2Agency(Agency):
                     comment=comment,
                     is_visible_on_front=False,
                     tracks=tracks,
+                    ship_date=transaction["data"].get("ship_date", None),
                 )
                 self.mage2OrderConnector.adaptor.commit()
 
@@ -377,43 +400,85 @@ class Mage2Agency(Agency):
                         status=order.get("status"),
                         allow_duplicate_comment=False,
                     )
+                if ns_status in ["canceled", "closed"] and len(api_item_ids) > 0:
+                    self.mage2OrderConnector.cancel_order_items(order, api_item_ids)
+                    status_comment = "Warehouse {warehouse} is canceled".format(
+                        warehouse=warehouse
+                    )
+                    self.mage2OrderConnector.insert_order_comment(
+                        order_id=order.get("entity_id"),
+                        comment=status_comment,
+                        status=order.get("status"),
+                        allow_duplicate_comment=False,
+                    )
                 return order.get("entity_id")
+            order_status_state_rows = self.mage2OrderConnector.get_order_status_state()
+            state_status = {}
+            for row in order_status_state_rows:
+                if row["state"] not in state_status:
+                    state_status[row["state"]] = []
+                state_status[row["state"]].append(row["status"])
 
             order = self.mage2OrderConnector.get_order_by_increment_id(increment_id)
             current_order_status = order.get("status")
+            # ns_status = transformed_status.replace(" ","_").replace("-", "_").lower()
             current_order_state = order.get("state")
             if current_order_status == ns_status:
                 return order.get("entity_id")
-            if current_order_state in [
-                self.mage2OrderConnector.STATE_NEW,
-                self.mage2OrderConnector.STATE_PROCESSING,
-                self.mage2OrderConnector.STATE_COMPLETE,
-                self.mage2OrderConnector.STATE_CANCELED,
-                self.mage2OrderConnector.STATE_CLOSED,
-            ]:
-                if current_order_state == self.mage2OrderConnector.STATE_CANCELED:
-                    if ns_status == "canceled":
+
+            status_comment = None
+            if (
+                current_order_state == self.mage2OrderConnector.STATE_COMPLETE
+                and ns_status
+                not in state_status[self.mage2OrderConnector.STATE_COMPLETE]
+            ):
+                status_comment = "The order is completed. Failed to update status to {ns_status}".format(
+                    ns_status=current_order_status
+                )
+            if status_comment is None:
+                if current_order_state in [
+                    self.mage2OrderConnector.STATE_NEW,
+                    self.mage2OrderConnector.STATE_PROCESSING,
+                    self.mage2OrderConnector.STATE_COMPLETE,
+                    self.mage2OrderConnector.STATE_CANCELED,
+                    self.mage2OrderConnector.STATE_CLOSED,
+                ]:
+                    if ns_status in ["canceled", "closed"]:
                         self.mage2OrderConnector.update_order_state_status(
-                            order.get("entity_id"), current_order_state, ns_status
+                            order.get("entity_id"), ns_status, ns_status
                         )
                     else:
-                        self.mage2OrderConnector.update_order_state_status(
-                            order.get("entity_id"),
-                            self.mage2OrderConnector.STATE_PROCESSING,
-                            ns_status,
-                        )
-                else:
-                    self.mage2OrderConnector.update_order_state_status(
-                        order.get("entity_id"), current_order_state, ns_status
-                    )
+                        if (
+                            current_order_state
+                            == self.mage2OrderConnector.STATE_CANCELED
+                        ):
+                            if ns_status == "canceled":
+                                self.mage2OrderConnector.update_order_state_status(
+                                    order.get("entity_id"),
+                                    current_order_state,
+                                    ns_status,
+                                )
+                            else:
+                                self.mage2OrderConnector.update_order_state_status(
+                                    order.get("entity_id"),
+                                    self.mage2OrderConnector.STATE_PROCESSING,
+                                    ns_status,
+                                )
+                        else:
+                            self.mage2OrderConnector.update_order_state_status(
+                                order.get("entity_id"), current_order_state, ns_status
+                            )
 
-            status_comment = "Update Status to {ns_status}".format(ns_status=ns_status)
-            self.mage2OrderConnector.insert_order_comment(
-                order_id=order.get("entity_id"),
-                comment=status_comment,
-                status=ns_status,
-                allow_duplicate_comment=True,
-            )
+                status_comment = "Update Status to {ns_status}".format(
+                    ns_status=ns_status
+                )
+            if status_comment is not None:
+                self.mage2OrderConnector.insert_order_comment(
+                    order_id=order.get("entity_id"),
+                    comment=status_comment,
+                    status=ns_status,
+                    allow_duplicate_comment=True,
+                )
         return order.get("entity_id")
 
     def transform_ns_order_status(self, transaction):
@@ -435,7 +500,7 @@ class Mage2Agency(Agency):
                 )
         return status
 
-    def insert_offline_order(self, increment_id, transaction):
+    def insert_offline_order_by_default_api(self, increment_id, transaction):
         tx_type_src_id = transaction.get("tx_type_src_id")
         items = transaction["data"].get("items", [])
         if len(items) == 0 or not increment_id:
@@ -618,6 +683,7 @@ class Mage2Agency(Agency):
                     "base_row_total": avaliable_item.get("row_total", 0),
                 }
             )
+
         response = self.mage2OrderConnector.request_magento_rest_api(
             api_path="orders/create", method="PUT", payload=posts
         )
@@ -629,6 +695,117 @@ class Mage2Agency(Agency):
         if sku in shipping_charge_skus:
             return True
         return False
+
+    def insert_offline_order_by_custom_api(self, increment_id, transaction):
+        tx_type_src_id = transaction.get("tx_type_src_id")
+        items = transaction["data"].get("items", [])
+        if len(items) == 0 or not increment_id:
+            raise Exception(f"{tx_type_src_id}: No items or empty increment_id")
+        if not transaction["data"].get("customer_id"):
+            raise Exception(f"{tx_type_src_id}: Empty customer_id")
+        company_no = transaction["data"].get("customer_id")
+        avaliable_items = []
+        for item in items:
+            # move product check logic to Magento
+            # product_id = self.mage2Connector.get_product_id_by_sku(item.get("sku"))
+            # if product_id != 0:
+            avaliable_items.append(item)
+        if len(avaliable_items) == 0:
+            raise Exception(f"{tx_type_src_id}: No avaliable product items")
+        warehouse_code_mapping = self.setting.get(
+            "location_name_warehouse_code_mapping", {}
+        )
+        warehouse_code = warehouse_code_mapping.get(
+            transaction["data"].get("location_name"), "chino"
+        )
+        offline_default_shipping_method = self.setting.get(
+            "offline_default_shipping_method", "freeshipping_freeshipping"
+        )
+        carrier_code, method_code = (
+            offline_default_shipping_method.split("_")[0],
+            offline_default_shipping_method.split("_")[1],
+        )
+        warehouse_data = {
+            "warehouse_code": warehouse_code,
+            "items": [
+                {
+                    "sku": item.get("sku"),
+                    "qty_ordered": item.get("qty_ordered", 0),
+                    "price": item.get("price", 0),
+                    "row_total": item.get("row_total", 0),
+                }
+                for item in avaliable_items
+            ],
+            "shipping_method": {
+                "carrier_code": carrier_code,
+                "method_code": method_code,
+                "method_name": transaction["data"].get("carrier_code", "Will Call"),
+                "amount": transaction["data"].get("shipping_amount", 0),
+            },
+        }
+        billing_address = transaction["data"].get("billing_address", {})
+        shipping_address = transaction["data"].get("shipping_address", {})
+        customer_po = transaction["data"].get("customer_po", None)
+        posts = {
+            "order": {
+                "order_type": "offline_ns",
+                "integration_id": increment_id,
+                "customer_id": company_no,
+                "increment_id": increment_id,
+                "customer_po": customer_po,
+                "billing_address": {
+                    "region": billing_address.get("region"),
+                    "city": billing_address.get("city"),
+                    "street": [billing_address.get("street")],
+                    "postcode": billing_address.get("postcode"),
+                    "firstname": (
+                        billing_address.get("contact").split(" ")[0]
+                        if billing_address.get("contact") is not None
+                        else ""
+                    ),
+                    "lastname": (
+                        (
+                            " ".join(billing_address.get("contact").split(" ")[1:])
+                            if len(billing_address.get("contact").split(" ")) > 1
+                            else ""
+                        )
+                        if billing_address.get("contact") is not None
+                        else ""
+                    ),
+                    "company": billing_address.get("company"),
+                    "country_id": billing_address.get("country_id"),
+                    "telephone": billing_address.get("telephone", "######"),
+                },
+                "shipping_address": {
+                    "region": shipping_address.get("region"),
+                    "city": shipping_address.get("city"),
+                    "street": [shipping_address.get("street")],
+                    "postcode": shipping_address.get("postcode"),
+                    "firstname": (
+                        shipping_address.get("contact").split(" ")[0]
+                        if shipping_address.get("contact") is not None
+                        else ""
+                    ),
+                    "lastname": (
+                        (
+                            " ".join(shipping_address.get("contact").split(" ")[1:])
+                            if len(shipping_address.get("contact").split(" ")) > 1
+                            else ""
+                        )
+                        if shipping_address.get("contact") is not None
+                        else ""
+                    ),
+                    "company": shipping_address.get("company"),
+                    "country_id": shipping_address.get("country_id"),
+                    "telephone": shipping_address.get("telephone", "######"),
+                },
+                "warehouses_data": [warehouse_data],
+                "created_at": transaction["data"].get("created_at"),
+            }
+        }
+        response = self.mage2OrderConnector.request_magento_rest_api(
+            api_path="integration/orders/create", method="PUT", payload=posts
+        )
 
     def get_customer_id_by_company_no(self, company_no):
         try:
