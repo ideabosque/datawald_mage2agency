@@ -17,7 +17,7 @@ def deploy() -> list:
             "service": "DataWald",
             "class": "Mage2Agency",
             "functions": {
-                "stream_handle": {
+                "retrieve_entities_from_source": {
                     "is_static": False,
                     "label": "mage2agency",
                     "mutation": [],
